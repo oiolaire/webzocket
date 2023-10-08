@@ -66,7 +66,7 @@ pub const Conn = struct {
             const mid_length: u16 = @truncate(payload_len);
             std.mem.writeIntBig(u16, msg[2..4], mid_length);
             next = 4;
-            actual_size = max_size - 4;
+            actual_size = max_size - 6;
         } else if (payload_len < 18446744073709551616) {
             msg[1] |= 127;
             const big_length: u64 = @intCast(payload_len);
