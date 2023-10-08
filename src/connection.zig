@@ -25,6 +25,7 @@ pub const Conn = struct {
     conn: *std.http.Client.Connection,
     req: *std.http.Client.Request,
     arena: std.heap.ArenaAllocator,
+    buffer: []u8,
 
     pub fn deinit(conn: *Conn) void {
         conn.req.deinit();
@@ -38,7 +39,12 @@ pub const Conn = struct {
 
     pub fn sendText(self: *Conn, text: []const u8) !void {
         var allocator = self.arena.allocator();
-        var msg = try allocator.alloc(u8, max_frame_header_size + text.len);
+
+        const max_size = max_frame_header_size + text.len;
+        if (self.buffer.len < max_size) {
+            self.buffer = try allocator.realloc(self.buffer, max_size);
+        }
+        var msg = self.buffer;
 
         msg[0] = 0;
         msg[0] |= fin_bit; // always set the fin bit because we don't support sending more than one
@@ -49,20 +55,24 @@ pub const Conn = struct {
 
         const payload_len = text.len;
         var next: usize = undefined;
+        var actual_size: usize = undefined;
         if (payload_len <= 125) {
             const sm_length: u8 = @truncate(payload_len);
             msg[1] |= sm_length;
             next = 2;
+            actual_size = max_size - 8;
         } else if (payload_len < 65536) {
             msg[1] |= 126;
             const mid_length: u16 = @truncate(payload_len);
             std.mem.writeIntBig(u16, msg[2..4], mid_length);
             next = 4;
+            actual_size = max_size - 4;
         } else if (payload_len < 18446744073709551616) {
             msg[1] |= 127;
             const big_length: u64 = @intCast(payload_len);
             std.mem.writeIntBig(u64, msg[2..10], big_length);
             next = 10;
+            actual_size = max_size;
         } else {
             return Error.MessageTooBig;
         }
@@ -73,7 +83,6 @@ pub const Conn = struct {
         // now write the actual data -- the mask is zero so it has no effect
         std.mem.copy(u8, msg[next + 4 ..], text);
 
-        const n = try self.conn.write(msg);
-        std.debug.print("written {}\n", .{n});
+        try self.conn.writeAll(msg[0..actual_size]);
     }
 };

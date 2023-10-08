@@ -12,4 +12,10 @@ test "test connection" {
     defer conn.deinit();
 
     try conn.sendText("hlelo");
+    try conn.sendText("zzzzzzzzz zzz zzzzzzzzzzzzz zzzzzzzz z");
+    try conn.sendText("nnn");
+
+    var mid: [500]u8 = undefined;
+    @memset(&mid, 'b');
+    try conn.sendText(&mid);
 }
