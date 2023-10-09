@@ -9,16 +9,27 @@ const fin_bit = 1 << 7;
 const rsv1_bit = 1 << 6;
 const rsv2_bit = 1 << 5;
 const rsv3_bit = 1 << 4;
-// opcodes
-const op_continuation = 0x0;
-const op_text = 0x1;
-const op_binary = 0x2;
-const op_close = 0x8;
-const op_ping = 0x9;
-const op_pong = 0xa;
+
+const Opcode = enum(u4) {
+    continuation = 0x0,
+    text = 0x1,
+    binary = 0x2,
+    close = 0x8,
+    ping = 0x9,
+    pong = 0xa,
+    _,
+};
+
+const Header = struct {
+    op: Opcode,
+    payload_len: usize,
+    has_mask: bool,
+    mask: [4]u8,
+};
 
 const ReadError = error{
     UnimplementedCondition,
+    InvalidFrame,
     Closed,
 };
 
@@ -37,11 +48,56 @@ pub const Conn = struct {
     }
 
     pub fn receive(self: *Conn) ![]const u8 {
+        const header = try self.receiveHeader();
+
+        switch (header.op) {
+            .continuation => {
+                std.debug.print("we don't know what to do when we see a continuation op\n", .{});
+                return ReadError.UnimplementedCondition;
+            },
+            .close => {
+                return ReadError.Closed;
+            },
+            .ping => {
+                try self.sendRaw(.pong, &.{});
+                return &.{};
+            },
+            .pong => {
+                std.debug.print("we got a pong\n", .{});
+                return &.{};
+            },
+            .binary, .text => {
+                var payload = try self.arena.allocator().alloc(u8, header.payload_len);
+                var n: usize = 0;
+                while (n < header.payload_len) {
+                    const more = try self.conn.read(payload[n..]);
+                    if (more < 1) {
+                        std.debug.print("can't read payload? {d}\n", .{more});
+                        return &.{};
+                    }
+                    n = n + more;
+                }
+
+                if (header.has_mask) {
+                    // TODO: unmask
+                }
+
+                return payload;
+            },
+            else => unreachable,
+        }
+    }
+
+    pub fn send(self: *Conn, payload: []const u8) !void {
+        return self.sendRaw(.text, payload);
+    }
+
+    fn receiveHeader(self: *Conn) !Header {
         var tmp: []u8 = self.read_buffer[0..2];
         const r = try self.conn.read(tmp);
         if (r < 2) {
             std.debug.print("nothing to read? {d}\n", .{r});
-            return &.{};
+            return ReadError.InvalidFrame;
         }
 
         var fin: bool = (tmp[0] & fin_bit) != 0;
@@ -62,7 +118,7 @@ pub const Conn = struct {
             const n = try self.conn.read(tmp);
             if (n < 2) {
                 std.debug.print("can't read mid-sized payload length? {d}\n", .{n});
-                return &.{};
+                return ReadError.InvalidFrame;
             }
             payload_len = @intCast(std.mem.readIntBig(u16, @as(*[2]u8, @ptrCast(tmp.ptr))));
         } else if (payload_len == 127) {
@@ -70,7 +126,7 @@ pub const Conn = struct {
             const n = try self.conn.read(tmp);
             if (n < 8) {
                 std.debug.print("can't read big-sized payload length? {d}\n", .{n});
-                return &.{};
+                return ReadError.InvalidFrame;
             }
             payload_len = @intCast(std.mem.readIntBig(u64, @as(*[8]u8, @ptrCast(tmp.ptr))));
         }
@@ -80,52 +136,22 @@ pub const Conn = struct {
             const n = try self.conn.read(&mask);
             if (n < 1) {
                 std.debug.print("can't read mask? {d}\n", .{n});
-                return &.{};
+                return ReadError.InvalidFrame;
             }
         }
 
-        switch (op) {
-            op_continuation => {
-                std.debug.print("we don't know what to do when we see a continuation op\n", .{});
-                return ReadError.UnimplementedCondition;
-            },
-            op_close => {
-                return ReadError.Closed;
-            },
-            op_ping => {
-                std.debug.print("we don't know what to do when we see a ping op\n", .{});
-                return ReadError.UnimplementedCondition;
-            },
-            op_pong => {
-                std.debug.print("we got a pong\n", .{});
-                return &.{};
-            },
-            op_binary, op_text => {
-                var payload = try self.arena.allocator().alloc(u8, payload_len);
-                var n: usize = 0;
-                while (n < payload_len) {
-                    const more = try self.conn.read(payload[n..]);
-                    if (more < 1) {
-                        std.debug.print("can't read payload? {d}\n", .{more});
-                        return &.{};
-                    }
-                    n = n + more;
-                }
-
-                if (has_mask) {
-                    // TODO: unmask
-                }
-
-                return payload;
-            },
-            else => unreachable,
-        }
+        return Header{
+            .op = @enumFromInt(op),
+            .payload_len = payload_len,
+            .has_mask = has_mask,
+            .mask = mask,
+        };
     }
 
-    pub fn send(self: *Conn, text: []const u8) !void {
+    fn sendRaw(self: *Conn, op: Opcode, payload: []const u8) !void {
         var allocator = self.arena.allocator();
 
-        const max_size = max_frame_header_size + text.len;
+        const max_size = max_frame_header_size + payload.len;
         if (self.write_buffer.len < max_size) {
             self.write_buffer = try allocator.realloc(self.write_buffer, max_size);
         }
@@ -133,12 +159,12 @@ pub const Conn = struct {
 
         msg[0] = 0;
         msg[0] |= fin_bit; // always set the fin bit because we don't support sending more than one
-        msg[0] |= op_text;
+        msg[0] |= @intFromEnum(op);
 
         msg[1] = 0;
         msg[1] |= mask_bit; // always set the mask bit because yes
 
-        const payload_len = text.len;
+        const payload_len = payload.len;
         var next: usize = undefined;
         var actual_size: usize = undefined;
         if (payload_len <= 125) {
@@ -164,7 +190,7 @@ pub const Conn = struct {
         std.mem.copy(u8, msg[next .. next + 4], &[_]u8{ 0, 0, 0, 0 });
 
         // now write the actual data -- the mask is zero so it has no effect
-        std.mem.copy(u8, msg[next + 4 ..], text);
+        std.mem.copy(u8, msg[next + 4 ..], payload);
 
         try self.conn.writeAll(msg[0..actual_size]);
     }
