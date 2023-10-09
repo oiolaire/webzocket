@@ -56,22 +56,20 @@ pub const Conn = struct {
         const op: u8 = tmp[0] & 0x0f;
         const has_mask: bool = (tmp[1] & mask_bit) != 0;
 
-        std.debug.print("x {b}\n", .{tmp[1]});
+        std.debug.print("x {b} {b}\n", .{ tmp[0], tmp[1] });
         var payload_len: usize = @intCast(tmp[1] & payload_len_bits);
         std.debug.print("y: {}\n", .{payload_len});
         if (payload_len == 126) {
-            std.debug.print("a\n", .{});
             tmp = self.read_buffer[0..2];
-            std.debug.print("b\n", .{});
+            std.debug.print("  b {b}\n", .{tmp});
             const mpln = try self.conn.read(tmp);
-            std.debug.print("c\n", .{});
             if (mpln < 2) {
                 std.debug.print("can't read mid-sized payload length? {d}\n", .{r});
                 return &.{};
             }
-            std.debug.print("d\n", .{});
-            payload_len = @intCast(std.mem.readIntLittle(u16, @as(*[2]u8, @ptrCast(tmp.ptr))));
-            std.debug.print("e\n", .{});
+            std.debug.print("  d {b}\n", .{tmp});
+            payload_len = @intCast(std.mem.readIntBig(u16, @as(*[2]u8, @ptrCast(tmp.ptr))));
+            std.debug.print("  e {}\n", .{payload_len});
         } else if (payload_len == 127) {
             tmp = self.read_buffer[0..8];
             const mpln = try self.conn.read(tmp);
