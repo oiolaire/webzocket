@@ -82,7 +82,8 @@ pub const Client = struct {
                 .conn = &conn.data,
                 .req = &req,
                 .arena = arena,
-                .buffer = &.{},
+                .read_buffer = undefined,
+                .write_buffer = &.{},
             };
         }
 

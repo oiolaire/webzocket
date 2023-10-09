@@ -18,4 +18,11 @@ test "test connection" {
     var mid: [500]u8 = undefined;
     @memset(&mid, 'b');
     try conn.sendText(&mid);
+
+    var text1 = try conn.readText();
+    var text2 = try conn.readText();
+    var text3 = try conn.readText();
+    std.debug.print("first text={s}\n", .{text1});
+    std.debug.print("second text={s}\n", .{text2});
+    std.debug.print("third text={s}\n", .{text3});
 }
