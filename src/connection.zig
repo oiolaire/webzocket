@@ -36,7 +36,7 @@ pub const Conn = struct {
         conn.arena.deinit();
     }
 
-    pub fn readText(self: *Conn) ![]const u8 {
+    pub fn receive(self: *Conn) ![]const u8 {
         var tmp: []u8 = self.read_buffer[0..2];
         const r = try self.conn.read(tmp);
         if (r < 2) {
@@ -56,25 +56,20 @@ pub const Conn = struct {
         const op: u8 = tmp[0] & 0x0f;
         const has_mask: bool = (tmp[1] & mask_bit) != 0;
 
-        std.debug.print("x {b} {b}\n", .{ tmp[0], tmp[1] });
         var payload_len: usize = @intCast(tmp[1] & payload_len_bits);
-        std.debug.print("y: {}\n", .{payload_len});
         if (payload_len == 126) {
             tmp = self.read_buffer[0..2];
-            std.debug.print("  b {b}\n", .{tmp});
-            const mpln = try self.conn.read(tmp);
-            if (mpln < 2) {
-                std.debug.print("can't read mid-sized payload length? {d}\n", .{r});
+            const n = try self.conn.read(tmp);
+            if (n < 2) {
+                std.debug.print("can't read mid-sized payload length? {d}\n", .{n});
                 return &.{};
             }
-            std.debug.print("  d {b}\n", .{tmp});
             payload_len = @intCast(std.mem.readIntBig(u16, @as(*[2]u8, @ptrCast(tmp.ptr))));
-            std.debug.print("  e {}\n", .{payload_len});
         } else if (payload_len == 127) {
             tmp = self.read_buffer[0..8];
-            const mpln = try self.conn.read(tmp);
-            if (mpln < 8) {
-                std.debug.print("can't read big-sized payload length? {d}\n", .{r});
+            const n = try self.conn.read(tmp);
+            if (n < 8) {
+                std.debug.print("can't read big-sized payload length? {d}\n", .{n});
                 return &.{};
             }
             payload_len = @intCast(std.mem.readIntBig(u64, @as(*[8]u8, @ptrCast(tmp.ptr))));
@@ -84,7 +79,7 @@ pub const Conn = struct {
         if (has_mask) {
             const n = try self.conn.read(&mask);
             if (n < 1) {
-                std.debug.print("can't read mask? {d}\n", .{r});
+                std.debug.print("can't read mask? {d}\n", .{n});
                 return &.{};
             }
         }
@@ -105,19 +100,17 @@ pub const Conn = struct {
                 std.debug.print("we got a pong\n", .{});
                 return &.{};
             },
-            op_binary => {
-                std.debug.print("we don't know what to do when we see a binary op\n", .{});
-                return ReadError.UnimplementedCondition;
-            },
-            op_text => {
+            op_binary, op_text => {
                 var payload = try self.arena.allocator().alloc(u8, payload_len);
-                const n = try self.conn.read(payload);
-                if (n < 1) {
-                    std.debug.print("can't read payload? {d}\n", .{r});
-                    return &.{};
+                var n: usize = 0;
+                while (n < payload_len) {
+                    const more = try self.conn.read(payload[n..]);
+                    if (more < 1) {
+                        std.debug.print("can't read payload? {d}\n", .{more});
+                        return &.{};
+                    }
+                    n = n + more;
                 }
-
-                std.debug.print("read payload: {}, mask is {}\n", .{ std.fmt.fmtSliceHexLower(payload), std.fmt.fmtSliceHexLower(&mask) });
 
                 if (has_mask) {
                     // TODO: unmask
@@ -129,7 +122,7 @@ pub const Conn = struct {
         }
     }
 
-    pub fn sendText(self: *Conn, text: []const u8) !void {
+    pub fn send(self: *Conn, text: []const u8) !void {
         var allocator = self.arena.allocator();
 
         const max_size = max_frame_header_size + text.len;
