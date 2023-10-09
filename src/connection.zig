@@ -94,6 +94,10 @@ pub const Conn = struct {
         return self.sendRaw(.text, payload);
     }
 
+    pub fn ping(self: *Conn) !void {
+        return self.sendRaw(.ping, &.{});
+    }
+
     fn receiveHeader(self: *Conn) !Header {
         var tmp: []u8 = self.read_buffer[0..2];
         const r = try self.conn.read(tmp);

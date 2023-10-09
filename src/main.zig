@@ -24,6 +24,7 @@ fn write(conn: *wz.Conn) !void {
     try conn.send("banana");
     try conn.send("uva");
     try conn.send("maçã");
+    try conn.ping();
 }
 
 fn read(conn: *wz.Conn) !void {
