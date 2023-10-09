@@ -11,10 +11,29 @@ test "test connection" {
     var conn = try client.connect("ws://127.0.0.1:8080/echo");
     defer conn.deinit();
 
-    try conn.send("hlelo");
+    var thread1 = try std.Thread.spawn(.{ .allocator = allocator }, read, .{&conn});
+    var thread2 = try std.Thread.spawn(.{ .allocator = allocator }, write, .{&conn});
 
-    var text1 = try conn.receive();
-    std.debug.print("first text={s}\n", .{text1});
-    var text2 = try conn.receive();
-    std.debug.print("second text={s}\n", .{text2});
+    std.time.sleep(5000000000);
+
+    thread1.join();
+    thread2.join();
+}
+
+fn write(conn: *wz.Conn) !void {
+    try conn.send("banana");
+    try conn.send("uva");
+    try conn.send("maçã");
+}
+
+fn read(conn: *wz.Conn) !void {
+    std.debug.print("starting thread\n", .{});
+    while (true) {
+        std.debug.print("will read\n", .{});
+        var text = try conn.receive();
+        std.debug.print("received text={s}\n", .{text});
+        if (std.mem.eql(u8, text, "uva")) {
+            try conn.send("thanks");
+        }
+    }
 }
