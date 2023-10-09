@@ -48,43 +48,45 @@ pub const Conn = struct {
     }
 
     pub fn receive(self: *Conn) ![]const u8 {
-        const header = try self.receiveHeader();
+        receiveFrame: while (true) {
+            const header = try self.receiveHeader();
 
-        switch (header.op) {
-            .continuation => {
-                std.debug.print("we don't know what to do when we see a continuation op\n", .{});
-                return ReadError.UnimplementedCondition;
-            },
-            .close => {
-                return ReadError.Closed;
-            },
-            .ping => {
-                try self.sendRaw(.pong, &.{});
-                return &.{};
-            },
-            .pong => {
-                std.debug.print("we got a pong\n", .{});
-                return &.{};
-            },
-            .binary, .text => {
-                var payload = try self.arena.allocator().alloc(u8, header.payload_len);
-                var n: usize = 0;
-                while (n < header.payload_len) {
-                    const more = try self.conn.read(payload[n..]);
-                    if (more < 1) {
-                        std.debug.print("can't read payload? {d}\n", .{more});
-                        return &.{};
+            switch (header.op) {
+                .continuation => {
+                    std.debug.print("we don't know what to do when we see a continuation op\n", .{});
+                    return ReadError.UnimplementedCondition;
+                },
+                .close => {
+                    return ReadError.Closed;
+                },
+                .ping => {
+                    try self.sendRaw(.pong, &.{});
+                    continue :receiveFrame;
+                },
+                .pong => {
+                    std.debug.print("we got a pong\n", .{});
+                    continue :receiveFrame;
+                },
+                .binary, .text => {
+                    var payload = try self.arena.allocator().alloc(u8, header.payload_len);
+                    var n: usize = 0;
+                    while (n < header.payload_len) {
+                        const more = try self.conn.read(payload[n..]);
+                        if (more < 1) {
+                            std.debug.print("can't read payload? {d}\n", .{more});
+                            return &.{};
+                        }
+                        n = n + more;
                     }
-                    n = n + more;
-                }
 
-                if (header.has_mask) {
-                    // TODO: unmask
-                }
+                    if (header.has_mask) {
+                        // TODO: unmask
+                    }
 
-                return payload;
-            },
-            else => unreachable,
+                    return payload;
+                },
+                else => unreachable,
+            }
         }
     }
 
