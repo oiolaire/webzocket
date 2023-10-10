@@ -81,7 +81,7 @@ pub const Conn = struct {
                     }
 
                     if (header.has_mask) {
-                        // TODO: unmask
+                        random.maskBytes(&header.mask, payload);
                     }
 
                     return payload;
