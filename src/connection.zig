@@ -1,5 +1,6 @@
 const std = @import("std");
 const client = @import("client.zig");
+const random = @import("random.zig");
 
 const max_frame_header_size = 2 + 8 + 4; // fixed header + length + mask
 const mask_bit = 1 << 7; // frame header byte 1 bits from section 5.2 of RFC 6455
@@ -60,7 +61,7 @@ pub const Conn = struct {
                     return ReadError.Closed;
                 },
                 .ping => {
-                    try self.sendRaw(.pong, &.{});
+                    try self.sendRaw(.pong, &.{}, false);
                     continue :receiveFrame;
                 },
                 .pong => {
@@ -91,11 +92,11 @@ pub const Conn = struct {
     }
 
     pub fn send(self: *Conn, payload: []const u8) !void {
-        return self.sendRaw(.text, payload);
+        return self.sendRaw(.text, payload, true);
     }
 
     pub fn ping(self: *Conn) !void {
-        return self.sendRaw(.ping, &.{});
+        return self.sendRaw(.ping, &.{}, false);
     }
 
     fn receiveHeader(self: *Conn) !Header {
@@ -154,7 +155,7 @@ pub const Conn = struct {
         };
     }
 
-    fn sendRaw(self: *Conn, op: Opcode, payload: []const u8) !void {
+    pub fn sendRaw(self: *Conn, op: Opcode, payload: []const u8, comptime with_nonzero_mask: bool) !void {
         var allocator = self.arena.allocator();
 
         const max_size = max_frame_header_size + payload.len;
@@ -170,33 +171,49 @@ pub const Conn = struct {
         msg[1] = 0;
         msg[1] |= mask_bit; // always set the mask bit because yes
 
-        const payload_len = payload.len;
         var next: usize = undefined;
         var actual_size: usize = undefined;
-        if (payload_len <= 125) {
-            const sm_length: u8 = @truncate(payload_len);
+        if (payload.len <= 125) {
+            const sm_length: u8 = @truncate(payload.len);
             msg[1] |= sm_length;
             next = 2;
             actual_size = max_size - 8;
-        } else if (payload_len < 65536) {
+        } else if (payload.len < 65536) {
             msg[1] |= 126;
-            const mid_length: u16 = @truncate(payload_len);
+            const mid_length: u16 = @truncate(payload.len);
             std.mem.writeIntBig(u16, msg[2..4], mid_length);
             next = 4;
             actual_size = max_size - 6;
         } else {
             msg[1] |= 127;
-            const big_length: u64 = @intCast(payload_len);
+            const big_length: u64 = @intCast(payload.len);
             std.mem.writeIntBig(u64, msg[2..10], big_length);
             next = 10;
             actual_size = max_size;
         }
 
-        // set mask to zero because we don't care
-        std.mem.copy(u8, msg[next .. next + 4], &[_]u8{ 0, 0, 0, 0 });
+        if (with_nonzero_mask) {
+            // get some random bytes for the mask
+            random.xoshiro256.fill(msg[next .. next + 4]);
+        } else {
+            // this mask thing is useless so we just won't do it
+            // but most servers will reject unmasked stuff so we will just set it to zero
+            std.mem.copy(u8, msg[next .. next + 4], &[_]u8{ 0, 0, 0, 0 });
+        }
 
-        // now write the actual data -- the mask is zero so it has no effect
+        // now write the actual data
         std.mem.copy(u8, msg[next + 4 ..], payload);
+
+        if (with_nonzero_mask) {
+            // mask the entire message (xor each byte with the mask bytes)
+            const mask = msg[next .. next + 4];
+            for (msg[next + 4 .. next + 4 + payload.len], 0..) |c, i| {
+                std.debug.print("masking {}: {} => {}\n", .{ i, c, c ^ mask[i % 4] });
+                msg[next + 4 + i] = c ^ mask[i % 4];
+            }
+        } else {
+            // the mask is zero so it has no effect and we don't have to do anything
+        }
 
         try self.conn.writeAll(msg[0..actual_size]);
     }

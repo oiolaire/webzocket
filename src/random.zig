@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub var xoshiro256 = std.rand.DefaultPrng.init(18);
+
 pub fn getString(allocator: std.mem.Allocator, size: usize) ![]const u8 {
     const time: u64 = @intCast(std.time.timestamp());
 
