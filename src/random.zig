@@ -2,6 +2,13 @@ const std = @import("std");
 
 pub var xoshiro256 = std.rand.DefaultPrng.init(18);
 
+pub fn maskBytes(mask: *[4]u8, bytes: []u8) void {
+    for (bytes, 0..) |c, i| {
+        std.debug.print("masking {}: {} => {}\n", .{ i, c, c ^ mask[i % 4] });
+        bytes[i] = c ^ mask[i % 4];
+    }
+}
+
 pub fn getString(allocator: std.mem.Allocator, size: usize) ![]const u8 {
     const time: u64 = @intCast(std.time.timestamp());
 

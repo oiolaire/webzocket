@@ -194,7 +194,8 @@ pub const Conn = struct {
 
         if (with_nonzero_mask) {
             // get some random bytes for the mask
-            random.xoshiro256.fill(msg[next .. next + 4]);
+            var mask = msg[next .. next + 4];
+            random.xoshiro256.fill(mask);
         } else {
             // this mask thing is useless so we just won't do it
             // but most servers will reject unmasked stuff so we will just set it to zero
@@ -206,11 +207,8 @@ pub const Conn = struct {
 
         if (with_nonzero_mask) {
             // mask the entire message (xor each byte with the mask bytes)
-            const mask = msg[next .. next + 4];
-            for (msg[next + 4 .. next + 4 + payload.len], 0..) |c, i| {
-                std.debug.print("masking {}: {} => {}\n", .{ i, c, c ^ mask[i % 4] });
-                msg[next + 4 + i] = c ^ mask[i % 4];
-            }
+            const mask = @as(*[4]u8, @ptrCast(msg[next .. next + 4].ptr));
+            random.maskBytes(mask, msg[next + 4 .. next + 4 + payload.len]);
         } else {
             // the mask is zero so it has no effect and we don't have to do anything
         }
