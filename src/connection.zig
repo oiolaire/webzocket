@@ -92,7 +92,7 @@ pub const Conn = struct {
     }
 
     pub fn send(self: *Conn, payload: []const u8) !void {
-        return self.sendRaw(.text, payload, true);
+        return self.sendRaw(.text, payload, false);
     }
 
     pub fn ping(self: *Conn) !void {
