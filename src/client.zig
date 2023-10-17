@@ -22,6 +22,7 @@ pub const Client = struct {
 
     pub fn deinit(self: *Client) void {
         self.client.deinit();
+        self.* = undefined;
     }
 
     pub fn connect(self: *Client, ws_url: []const u8) !connection.Conn {

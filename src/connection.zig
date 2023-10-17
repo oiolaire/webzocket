@@ -42,10 +42,11 @@ pub const Conn = struct {
     read_buffer: [8]u8,
     write_buffer: []u8,
 
-    pub fn deinit(conn: *Conn) void {
-        conn.req.deinit();
-        conn.conn.deinit(&conn.client.client);
-        conn.arena.deinit();
+    pub fn deinit(self: *Conn) void {
+        self.req.deinit();
+        self.conn.deinit(&self.client.client);
+        self.arena.deinit();
+        self.* = undefined;
     }
 
     pub fn receive(self: *Conn) ![]const u8 {
